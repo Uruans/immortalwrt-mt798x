@@ -1,0 +1,78 @@
+name: Build Firmware
+
+on:
+  workflow_dispatch:
+    inputs:
+      defconfig:
+        description: Device config from defconfig/
+        required: true
+        default: mt7981-ax3000.config
+        type: choice
+        options:
+          - mt7981-ax3000.config
+          - mt7986-ax4200.config
+          - mt7986-ax6000-256m.config
+          - mt7986-ax6000.config
+          - mt7986-ax7800.config
+      extra_make_args:
+        description: Additional make arguments, e.g. V=s
+        required: false
+        default: ""
+        type: string
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+  TZ: Asia/Shanghai
+
+jobs:
+  build:
+    runs-on: ubuntu-20.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android || true
+          df -h
+
+      - name: Install build dependencies
+        run: sudo bash -c 'bash <(curl -sL https://build-scripts.immortalwrt.eu.org/init_build_environment.sh)'
+
+      - name: Update feeds
+        run: ./scripts/feeds update -a
+
+      - name: Install feeds
+        run: ./scripts/feeds install -a
+
+      - name: Prepare configuration
+        run: |
+          cp -f "defconfig/${{ inputs.defconfig }}" .config
+          make defconfig
+
+      - name: Download sources
+        run: make download -j8
+
+      - name: Build firmware
+        env:
+          EXTRA_MAKE_ARGS: ${{ inputs.extra_make_args }}
+        run: |
+          make -j"$(nproc)" ${EXTRA_MAKE_ARGS}
+
+      - name: Show output files
+        if: always()
+        run: |
+          find bin/targets -maxdepth 3 -type f | sort || true
+
+      - name: Upload firmware artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ inputs.defconfig }}
+          path: |
+            bin/targets/**/*
+            .config
+          if-no-files-found: warn
+          retention-days: 7
